@@ -194,7 +194,7 @@ func (ms *MemoryStorage) ApplySnapshot(snap pb.Snapshot) error {
 // can be used to reconstruct the state at that point.
 // If any configuration changes have been made since the last compaction,
 // the result of the last ApplyConfChange must be passed in.
-// 创建快照(从ents头部知道i位置的数据)
+// 创建快照(从ents头部到i位置的数据)
 func (ms *MemoryStorage) CreateSnapshot(i uint64, cs *pb.ConfState, data []byte) (pb.Snapshot, error) {
 	ms.Lock()
 	defer ms.Unlock()
@@ -260,16 +260,17 @@ func (ms *MemoryStorage) Append(entries []pb.Entry) error {
 		return nil
 	}
 	// truncate compacted entries
+	// 将小于first部分给砍掉
 	if first > entries[0].Index {
 		entries = entries[first-entries[0].Index:]
 	}
 
 	offset := entries[0].Index - ms.ents[0].Index
 	switch {
-	case uint64(len(ms.ents)) > offset:
+	case uint64(len(ms.ents)) > offset:	//entries的头部在ents中间
 		ms.ents = append([]pb.Entry{}, ms.ents[:offset]...)
 		ms.ents = append(ms.ents, entries...)
-	case uint64(len(ms.ents)) == offset:
+	case uint64(len(ms.ents)) == offset: // entries的头部是ents的下一个位置
 		ms.ents = append(ms.ents, entries...)
 	default:
 		getLogger().Panicf("missing log entry [last: %d, append at: %d]",
