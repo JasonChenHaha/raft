@@ -865,6 +865,7 @@ func (r *raft) Step(m pb.Message) error {
 	case m.Term > r.Term:
 		if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
 			force := bytes.Equal(m.Context, []byte(campaignTransfer))
+			// 如果开启了Check Quorum（开启Check Quorum会自动开启Leader Lease），且election timeout超时前收到过leader的消息，那么inLease为真，表示当前Leader Lease还没有过期。
 			inLease := r.checkQuorum && r.lead != None && r.electionElapsed < r.electionTimeout
 			if !force && inLease {
 				// 在收到的term大于本机term情况下，如果不是leader转移状态，或者已经存在leader并且还没有选举超时
@@ -888,6 +889,7 @@ func (r *raft) Step(m pb.Message) error {
 		default: // 默认处理就是直接把自己降为follower
 			r.logger.Infof("%x [term: %d] received a %s message with higher term from %x [term: %d]",
 				r.id, r.Term, m.Type, m.From, m.Term)
+				// 这些type说明这是来自leader的消息
 			if m.Type == pb.MsgApp || m.Type == pb.MsgHeartbeat || m.Type == pb.MsgSnap {
 				r.becomeFollower(m.Term, m.From)
 			} else {

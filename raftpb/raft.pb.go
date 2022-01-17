@@ -87,7 +87,7 @@ const (
 	MsgSnapStatus     MessageType = 11
 	MsgCheckQuorum    MessageType = 12
 	MsgTransferLeader MessageType = 13
-	MsgTimeoutNow     MessageType = 14
+	MsgTimeoutNow     MessageType = 14 		// MsgTimeoutNow消息是发生Leader Transfer时，leader通知目标节点立即超时并发起选举请求的消息
 	MsgReadIndex      MessageType = 15
 	MsgReadIndexResp  MessageType = 16
 	MsgPreVote        MessageType = 17
