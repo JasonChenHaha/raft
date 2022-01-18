@@ -139,6 +139,8 @@ func (pr *Progress) ProbeAcked() {
 
 // BecomeProbe transitions into StateProbe. Next is reset to Match+1 or,
 // optionally and if larger, the index of the pending snapshot.
+// 当leader刚刚当选时，或当follower拒绝了leader复制的日志时，该follower的进度状态会变为StateProbe类型。
+// 在该状态下，leader每次心跳期间仅为follower发送一条MsgApp消息，且leader会根据follower发送的相应的MsgAppResp消息调整该follower的进度
 func (pr *Progress) BecomeProbe() {
 	// If the original state is StateSnapshot, progress knows that
 	// the pending snapshot has been sent to this peer successfully, then
@@ -159,6 +161,7 @@ func (pr *Progress) BecomeProbe() {
 }
 
 // BecomeReplicate transitions into StateReplicate, resetting Next to Match+1.
+// 该状态下的follower处于稳定状态，leader会优化为其复制日志的速度，每次可能发送多条MsgApp消息（受Progress的流控限制)
 func (pr *Progress) BecomeReplicate() {
 	pr.ResetState(StateReplicate)
 	pr.Next = pr.Match + 1
@@ -166,6 +169,8 @@ func (pr *Progress) BecomeReplicate() {
 
 // BecomeSnapshot moves the Progress to StateSnapshot with the specified pending
 // snapshot index.
+// 当follower所需的日志已被压缩无法访问时，leader会将该follower的进度置为StateSnapshot状态，并向该follower发送快照。
+// leader不会为处于StateSnapshot状态的follower发送任何的MsgApp消息，直到其成功收到快照。
 func (pr *Progress) BecomeSnapshot(snapshoti uint64) {
 	// 此处为什么不需要调整Next？因为这个状态无需在发日志给peer，直到快照完成后才能继续
 	pr.ResetState(StateSnapshot)
