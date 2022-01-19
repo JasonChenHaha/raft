@@ -753,6 +753,7 @@ func (r *raft) becomeLeader() {
 	// could be expensive.
 	r.pendingConfIndex = r.raftLog.lastIndex()
 
+	// 追加一条空日志，以提交之前的日志
 	emptyEnt := pb.Entry{Data: nil}
 	if !r.appendEntry(emptyEnt) {
 		// This won't happen because we just called reset() above.
@@ -762,6 +763,7 @@ func (r *raft) becomeLeader() {
 	// uncommitted log quota. This is because we want to preserve the
 	// behavior of allowing one entry larger than quota if the current
 	// usage is zero.
+	// 在appendEntry中通过increaseUncommittedSize使用了一定量的配额
 	r.reduceUncommittedSize([]pb.Entry{emptyEnt})
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
 }
@@ -1043,8 +1045,9 @@ func stepLeader(r *raft, m pb.Message) error {
 			// If we are not currently a member of the range (i.e. this node
 			// was removed from the configuration while serving as leader),
 			// drop any new proposals.
-			return ErrProposalDropped
+			return ErrProposalDropped 
 		}
+		// leader正在将领导权转移给其他节点，旧leader抛掉该消息
 		if r.leadTransferee != None {
 			r.logger.Debugf("%x [term %d] transfer leadership to %x is in progress; dropping proposal", r.id, r.Term, r.leadTransferee)
 			return ErrProposalDropped
@@ -1269,6 +1272,7 @@ func stepLeader(r *raft, m pb.Message) error {
 				case pr.State == tracker.StateProbe:
 					pr.BecomeReplicate()
 				case pr.State == tracker.StateSnapshot && pr.Match >= pr.PendingSnapshot:
+					// 如果该follower处于StateSnapshot状态且现在跟上了进度，且从该follower发送该消息后到leader处理这条消息时，leader没有为其发送新快照（通过比较Match与PendingSnapshot判断），则将其转为StateReplica状态。
 					// TODO(tbg): we should also enter this branch if a snapshot is
 					// received that is below pr.PendingSnapshot but which makes it
 					// possible to use the log again.
@@ -1278,7 +1282,7 @@ func stepLeader(r *raft, m pb.Message) error {
 					// move to replicating state, that would only happen with
 					// the next round of appends (but there may not be a next
 					// round for a while, exposing an inconsistent RaftStatus).
-					pr.BecomeProbe()
+					pr.BecomeProbe() // 这个函数调用毫无意义啊！！！！为什么！！！
 					pr.BecomeReplicate()
 				case pr.State == tracker.StateReplicate:
 					pr.Inflights.FreeLE(m.Index)
@@ -1307,7 +1311,12 @@ func stepLeader(r *raft, m pb.Message) error {
 					r.logger.Infof("%x sent MsgTimeoutNow to %x after received MsgAppResp", r.id, m.From)
 					r.sendTimeoutNow(m.From)
 				}
-			}
+			} // {
+				// 该情况不会对该消息做任何处理，原因有三
+				// 1.这条消息是过期的消息，不需要处理。
+				// 2.这条消息可能是follower应用快照发来的响应，且此时该follower仍未跟上其match index（可能是follower重启恢复后导致的）。此处后续处理逻辑即为在4.3节中提到的跳出StateSnapshot的第1中情况；如果这里因没跟上match index而没有跳出StateSnapshot状态，也会在etcd/raft模块使用者主动调用ReportSnapshot方法时跳出该状态。因此不会阻塞。
+				// 3.这条消息可能是StateProbe状态的follower发来的确认相应，但此时该follower仍未跟上其match index（可能是follower重启恢复后导致的）。因在一次心跳周期内，leader仅应向处于StateProbe状态的follower发送1条MsgApp消息，因此其释放应在心跳相关的逻辑中，该逻辑会在后文分析。因此也不会阻塞。
+			// }
 		}
 	case pb.MsgHeartbeatResp:
 		pr.RecentActive = true
@@ -1349,6 +1358,7 @@ func stepLeader(r *raft, m pb.Message) error {
 		} else {
 			// NB: the order here matters or we'll be probing erroneously from
 			// the snapshot index, but the snapshot never applied.
+			// 在没有将其置为0时，下一次检测日志匹配时会从该follower的match index + 1和该快照的index+1二者中较大者开始检测；而将其置为0后，只会从该follower的match index + 1开始检测。
 			pr.PendingSnapshot = 0
 			pr.BecomeProbe()
 			r.logger.Debugf("%x snapshot failed, resumed sending replication messages to %x [%s]", r.id, m.From, pr)
@@ -1502,7 +1512,7 @@ func stepFollower(r *raft, m pb.Message) error {
 	return nil
 }
 
-// 处理entry的拼接的相关逻辑
+// follower处理msgApp的消息
 func (r *raft) handleAppendEntries(m pb.Message) {
 	if m.Index < r.raftLog.committed {
 		// 如果已经提交过了, 告知对方目前提交的位置
@@ -1549,6 +1559,7 @@ func (r *raft) handleHeartbeat(m pb.Message) {
 	r.send(pb.Message{To: m.From, Type: pb.MsgHeartbeatResp, Context: m.Context})
 }
 
+// follower处理msgSnap的消息
 func (r *raft) handleSnapshot(m pb.Message) {
 	sindex, sterm := m.Snapshot.Metadata.Index, m.Snapshot.Metadata.Term
 	if r.restore(m.Snapshot) {

@@ -219,6 +219,7 @@ func (pr *Progress) OptimisticUpdate(n uint64) { pr.Next = n + 1 }
 //
 // If the rejection is genuine, Next is lowered sensibly, and the Progress is
 // cleared for sending log entries.
+// matchHint其实就是最后一条日志的索引(即MsgAppResp的RejectHint)
 func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 	// 复制状态下Match是有效的，可以通过Match判断拒绝的日志是否已经无效了
 	if pr.State == StateReplicate {
@@ -230,14 +231,14 @@ func (pr *Progress) MaybeDecrTo(rejected, matchHint uint64) bool {
 		// Directly decrease next to match + 1.
 		//
 		// TODO(tbg): why not use matchHint if it's larger?
-		// 源码注释：直接把Next调整到Match+1。源码注释还有一句是如果last更大为什么不用他？
-        // last有可能比Match大么？让我们分析一下，因为在复制状态下Leader会发送多个日志信息
+		// 源码注释：直接把Next调整到Match+1。源码注释还有一句是如果matchHint更大为什么不用他？
+        // matchHint有可能比Match大么？让我们分析一下，因为在复制状态下Leader会发送多个日志信息
         // 给Peer再等待Peer的回复，例如：Match+1，Match+2，Match+3，Match+4，此时如果
-        // Match+3丢了，那么Match+4肯定会被拒绝，此时last应该是Match+2，Next=last+1
+        // Match+3丢了，那么Match+4肯定会被拒绝，此时matchHint应该是Match+2，Next=matchHint+1
         // 应该更合理。但是从peer的角度看，如果收到了Match+2的日志就会给leader一次回复，这个
         // 回复理论上是早于当前这个拒绝消息的，所以当Leader收到Match+4拒绝消息，此时的Match
         // 已经更新到Match+2，如果Peer回复的消息也丢包了Match可能也没有更新。所以Match+1
-        // 大概率和last相同，少数情况可能last更好，但是用Match+1做可能更保险一点。
+        // 大概率和matchHint相同，少数情况可能matchHint更好，但是用Match+1做可能更保险一点。
 		pr.Next = pr.Match + 1
 		return true
 	}
