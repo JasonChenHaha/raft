@@ -181,6 +181,7 @@ type Config struct {
 	// should (clock can move backward/pause without any bound). ReadIndex is not safe
 	// in that case.
 	// CheckQuorum MUST be enabled if ReadOnlyOption is ReadOnlyLeaseBased.
+	// 查阅https://blog.csdn.net/Cassie_zkq/article/details/115724570
 	ReadOnlyOption ReadOnlyOption
 
 	// Logger is the logger used for raft log. For multinode which can host
