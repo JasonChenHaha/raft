@@ -128,7 +128,7 @@ func (rd Ready) containsUpdates() bool {
 // appliedCursor extracts from the Ready the highest index the client has
 // applied (once the Ready is confirmed via Advance). If no information is
 // contained in the Ready, returns zero.
-// 获得applied段最高位index
+// 获得已经提交entry里面的最新的index
 func (rd Ready) appliedCursor() uint64 {
 	if n := len(rd.CommittedEntries); n > 0 {
 		return rd.CommittedEntries[n-1].Index

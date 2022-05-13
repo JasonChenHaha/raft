@@ -149,6 +149,7 @@ func (p *ProgressTracker) ConfState() pb.ConfState {
 	return pb.ConfState{
 		Voters:         p.Voters[0].Slice(),
 		VotersOutgoing: p.Voters[1].Slice(),
+		// MajorityConfig 来自 majority.go 的 type MajorityConfig map[uint64]struct{}
 		Learners:       quorum.MajorityConfig(p.Learners).Slice(),
 		LearnersNext:   quorum.MajorityConfig(p.LearnersNext).Slice(),
 		AutoLeave:      p.AutoLeave,
@@ -157,6 +158,7 @@ func (p *ProgressTracker) ConfState() pb.ConfState {
 
 // IsSingleton returns true if (and only if) there is only one voting member
 // (i.e. the leader) in the current configuration.
+// 判断当前配置是否为单节点模式
 func (p *ProgressTracker) IsSingleton() bool {
 	return len(p.Voters[0]) == 1 && len(p.Voters[1]) == 0
 }

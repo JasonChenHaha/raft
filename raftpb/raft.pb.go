@@ -73,24 +73,24 @@ func (EntryType) EnumDescriptor() ([]byte, []int) {
 type MessageType int32
 
 const (
-	MsgHup            MessageType = 0
-	MsgBeat           MessageType = 1
-	MsgProp           MessageType = 2
-	MsgApp            MessageType = 3
+	MsgHup            MessageType = 0 // 本地 	当follower节点的选举计时器超时时发，触发pre-vote或者vote
+	MsgBeat           MessageType = 1 // 本地 	心跳(本地消息，leader用它通知自己广播heartbeat消息)
+	MsgProp           MessageType = 2 // 本地 	发起提议，触发msgApp
+	MsgApp            MessageType = 3 // 非本地	复制/配置变更
 	MsgAppResp        MessageType = 4
-	MsgVote           MessageType = 5
+	MsgVote           MessageType = 5 // 非本地	preCandidate收到半数以上投票之后，发起选举
 	MsgVoteResp       MessageType = 6
-	MsgSnap           MessageType = 7
-	MsgHeartbeat      MessageType = 8
+	MsgSnap           MessageType = 7 // 非本地	leader向follower发快照
+	MsgHeartbeat      MessageType = 8 // 非本地	心跳
 	MsgHeartbeatResp  MessageType = 9
-	MsgUnreachable    MessageType = 10
-	MsgSnapStatus     MessageType = 11
-	MsgCheckQuorum    MessageType = 12
-	MsgTransferLeader MessageType = 13
-	MsgTimeoutNow     MessageType = 14 		// MsgTimeoutNow消息是发生Leader Transfer时，leader通知目标节点立即超时并发起选举请求的消息
-	MsgReadIndex      MessageType = 15
+	MsgUnreachable    MessageType = 10 // 本地 	follower消息不可达
+	MsgSnapStatus     MessageType = 11 // 本地 	如果Leader发送MsgSnap消息时出现异常，则会发送MsgUnreachable和MsgSnapStatus消息
+	MsgCheckQuorum    MessageType = 12 // 本地 	Leader检测是否保持半数以上的连接
+	MsgTransferLeader MessageType = 13 // 本地 	Leader节点转移时使用
+	MsgTimeoutNow     MessageType = 14 // 非本地 MsgTimeoutNow消息是发生Leader Transfer时，leader通知目标节点立即超时并发起选举请求的消息
+	MsgReadIndex      MessageType = 15 // 非本地 客户端发往集群的只读消息使用MsgReadIndex消息（只读的两种模式：ReadOnlySafe和ReadOnlyLeaseBased）
 	MsgReadIndexResp  MessageType = 16
-	MsgPreVote        MessageType = 17
+	MsgPreVote        MessageType = 17 // 非本地 预选举消息
 	MsgPreVoteResp    MessageType = 18
 )
 
@@ -168,6 +168,7 @@ type ConfChangeTransition int32
 const (
 	// Automatically use the simple protocol if possible, otherwise fall back
 	// to ConfChangeJointImplicit. Most applications will want to use this.
+	// 自动选择行为，当配置变更可以通过简单算法完成时，直接使用简单算法；否则使用ConfChangeTransitionJointImplicit行为。
 	ConfChangeTransitionAuto ConfChangeTransition = 0
 	// Use joint consensus unconditionally, and transition out of them
 	// automatically (by proposing a zero configuration change).
@@ -175,11 +176,13 @@ const (
 	// This option is suitable for applications that want to minimize the time
 	// spent in the joint configuration and do not store the joint configuration
 	// in the state machine (outside of InitialState).
+	// 强制使用joint consensus，并在适当时间通过Changes为空的ConfChangeV2消息自动退出joint consensus。该方法适用于希望减少joint consensus时间且不需要在状态机中保存joint configuraiont的程序。
 	ConfChangeTransitionJointImplicit ConfChangeTransition = 1
 	// Use joint consensus and remain in the joint configuration until the
 	// application proposes a no-op configuration change. This is suitable for
 	// applications that want to explicitly control the transitions, for example
 	// to use a custom payload (via the Context field).
+	// 强制使用joint consensus，但不会自动退出joint consensus，而是需要etcd/raft模块的使用者通过提交Changes为空的ConfChangeV2消息退出joint consensus。该方法适用于希望显式控制配置变更的程序，如自定义了Context字段内容的程序。
 	ConfChangeTransitionJointExplicit ConfChangeTransition = 2
 )
 
@@ -638,6 +641,7 @@ var xxx_messageInfo_ConfChangeSingle proto.InternalMessageInfo
 // For details on Raft membership changes, see:
 //
 // [1]: https://github.com/ongardie/dissertation/blob/master/online-trim.pdf
+// transition 表示切换配置的行为
 type ConfChangeV2 struct {
 	Transition ConfChangeTransition `protobuf:"varint,1,opt,name=transition,enum=raftpb.ConfChangeTransition" json:"transition"`
 	Changes    []ConfChangeSingle   `protobuf:"bytes,2,rep,name=changes" json:"changes"`

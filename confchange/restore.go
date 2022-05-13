@@ -23,7 +23,7 @@ import (
 // first the config that will become the outgoing one, and then the incoming one, and
 // b) another slice that, when applied to the config resulted from 1), represents the
 // ConfState.
-// 将ConfState拆分成Cold和Cnew两套配置
+// 将ConfState拆分格式化成Cold和Cnew两套配置
 func toConfChangeSingle(cs pb.ConfState) (out []pb.ConfChangeSingle, in []pb.ConfChangeSingle) {
 	// Example to follow along this code:
 	// voters=(1 2 3) learners=(5) outgoing=(1 2 4 6) learners_next=(4)
@@ -117,6 +117,8 @@ func chain(chg Changer, ops ...func(Changer) (tracker.Config, tracker.ProgressMa
 // the Changer only needs a ProgressMap (not a whole Tracker) at which point
 // this can just take LastIndex and MaxInflight directly instead and cook up
 // the results from that alone.
+// 把cs格式化，然后遍历创建cfg和prs
+// cfg是tracker.Config, prs是tracker.ProgressMap
 func Restore(chg Changer, cs pb.ConfState) (tracker.Config, tracker.ProgressMap, error) {
 	outgoing, incoming := toConfChangeSingle(cs)
 

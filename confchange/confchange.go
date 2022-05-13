@@ -127,6 +127,7 @@ func (c Changer) LeaveJoint() (tracker.Config, tracker.ProgressMap, error) {
 // will return an error if that is not the case, if the resulting quorum is
 // zero, or if the configuration is in a joint state (i.e. if there is an
 // outgoing configuration).
+// 先检查是不是joint config的中间过渡状态，然后用ccs生成cfg和prs
 func (c Changer) Simple(ccs ...pb.ConfChangeSingle) (tracker.Config, tracker.ProgressMap, error) {
 	cfg, prs, err := c.checkAndCopy()
 	if err != nil {
@@ -150,6 +151,7 @@ func (c Changer) Simple(ccs ...pb.ConfChangeSingle) (tracker.Config, tracker.Pro
 // apply a change to the configuration. By convention, changes to voters are
 // always made to the incoming majority config Voters[0]. Voters[1] is either
 // empty or preserves the outgoing majority configuration while in a joint state.
+// 根据ccs给cfg和prs设置成不同的状态值
 func (c Changer) apply(cfg *tracker.Config, prs tracker.ProgressMap, ccs ...pb.ConfChangeSingle) error {
 	for _, cc := range ccs {
 		if cc.NodeID == 0 {

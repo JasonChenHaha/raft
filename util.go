@@ -225,7 +225,7 @@ func limitSize(ents []pb.Entry, maxSize uint64) []pb.Entry {
 	return ents[:limit]
 }
 
-// 比较两个配置是否相同
+// 比较两个配置是否相同,如果不同就报错
 func assertConfStatesEquivalent(l Logger, cs1, cs2 pb.ConfState) {
 	err := cs1.Equivalent(cs2)
 	if err == nil {

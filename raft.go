@@ -348,6 +348,8 @@ func newRaft(c *Config) *raft {
 		disableProposalForwarding: c.DisableProposalForwarding,
 	}
 
+	// 用存储的配置cs生成cfg和prs
+	// cfg和prs才是给程序使用的对象
 	cfg, prs, err := confchange.Restore(confchange.Changer{
 		Tracker:   r.prs,
 		LastIndex: raftlog.lastIndex(),
@@ -356,6 +358,7 @@ func newRaft(c *Config) *raft {
 
 		panic(err)
 	}
+	// 把cfg和prs交接给raft结构, 并检查操作之后的cs和之前的cs是否相同，不相同代表操作有误
 	assertConfStatesEquivalent(r.logger, cs, r.switchToConfig(cfg, prs))
 
 	if !IsEmptyHardState(hs) {
@@ -396,6 +399,7 @@ func (r *raft) send(m pb.Message) {
 	}
 	if m.Type == pb.MsgVote || m.Type == pb.MsgVoteResp || m.Type == pb.MsgPreVote || m.Type == pb.MsgPreVoteResp {
 		if m.Term == 0 {
+			// 这些类型需要携带term
 			// All {pre-,}campaign messages need to have the term set when
 			// sending.
 			// - MsgVote: m.Term is the term the node is campaigning for,
@@ -418,6 +422,7 @@ func (r *raft) send(m pb.Message) {
 		// proposals are a way to forward to the leader and
 		// should be treated as local message.
 		// MsgReadIndex is also forwarded to leader.
+		// 这俩是要转发到leader的，不用填term
 		if m.Type != pb.MsgProp && m.Type != pb.MsgReadIndex {
 			m.Term = r.Term
 		}
@@ -508,6 +513,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 	// or it might not have all the committed entries.
 	// The leader MUST NOT forward the follower's commit to
 	// an unmatched index.
+	// follower 可能会落后leader, 所以需要取最小值
 	commit := min(r.prs.Progress[to].Match, r.raftLog.committed)
 	m := pb.Message{
 		To:      to,
@@ -521,6 +527,7 @@ func (r *raft) sendHeartbeat(to uint64, ctx []byte) {
 
 // bcastAppend sends RPC, with entries to all peers that are not up-to-date
 // according to the progress recorded in r.prs.
+// 向所有follower发送对应落后的entry
 func (r *raft) bcastAppend() {
 	r.prs.Visit(func(id uint64, _ *tracker.Progress) {
 		if id == r.id {
@@ -592,6 +599,8 @@ func (r *raft) advance(rd Ready) {
 // maybeCommit attempts to advance the commit index. Returns true if
 // the commit index changed (in which case the caller should call
 // r.bcastAppend).
+// 从progress那边获得法定的最高提交index
+// 丢给raftLog去刷新进度
 func (r *raft) maybeCommit() bool {
 	mci := r.prs.Committed()
 	return r.raftLog.maybeCommit(mci, r.Term)
@@ -655,6 +664,7 @@ func (r *raft) appendEntry(es ...pb.Entry) (accepted bool) {
 func (r *raft) tickElection() {
 	r.electionElapsed++
 
+	// 如果超时，并有资格竞争，发起选举
 	if r.promotable() && r.pastElectionTimeout() {
 		r.electionElapsed = 0
 		if err := r.Step(pb.Message{From: r.id, Type: pb.MsgHup}); err != nil {
@@ -745,6 +755,7 @@ func (r *raft) becomeLeader() {
 	// (perhaps after having received a snapshot as a result). The leader is
 	// trivially in this state. Note that r.reset() has initialized this
 	// progress with the last index already.
+	// 不懂。。。
 	r.prs.Progress[r.id].BecomeReplicate()
 
 	// Conservatively set the pendingConfIndex to the last index in the
@@ -769,6 +780,7 @@ func (r *raft) becomeLeader() {
 	r.logger.Infof("%x became leader at term %d", r.id, r.Term)
 }
 
+// 当选举超时触发该函数重新发起竞选
 func (r *raft) hup(t CampaignType) {
 	if r.state == StateLeader {
 		r.logger.Debugf("%x ignoring MsgHup because already leader", r.id)
@@ -869,6 +881,10 @@ func (r *raft) Step(m pb.Message) error {
 		if m.Type == pb.MsgVote || m.Type == pb.MsgPreVote {
 			force := bytes.Equal(m.Context, []byte(campaignTransfer))
 			// 如果开启了Check Quorum（开启Check Quorum会自动开启Leader Lease），且election timeout超时前收到过leader的消息，那么inLease为真，表示当前Leader Lease还没有过期。
+			// leader lease机制:当节点在election timeout超时前，如果收到了leader的消息，那么它不会为其它发起投票或预投票请求的节点投票.
+			// leader Lease需要依赖Check Quorum机制才能正常工作
+			// 参考https://mrcroxx.github.io/posts/code-reading/etcdraft-made-simple/3-election/#12-check-quorum的1.3
+			// inLease 是否还在租期
 			inLease := r.checkQuorum && r.lead != None && r.electionElapsed < r.electionTimeout
 			if !force && inLease {
 				// 在收到的term大于本机term情况下，如果不是leader转移状态，或者已经存在leader并且还没有选举超时
@@ -902,6 +918,8 @@ func (r *raft) Step(m pb.Message) error {
 
 	case m.Term < r.Term: // 当消息中Term小于本地存储的Term则说明曾经出现过脑裂，新的leader正在领导集群
 		if (r.checkQuorum || r.preVote) && (m.Type == pb.MsgHeartbeat || m.Type == pb.MsgApp) {
+			// 如果收到了term比当前节点term低的leader的消息，且集群开启了Check Quorum / Leader Lease或Pre-Vote，那么发送一条term为当前term的消息，令term低的节点成为follower
+			// 参考https://mrcroxx.github.io/posts/code-reading/etcdraft-made-simple/3-election/#13-leader-lease的1.4
 			// We have received messages from a leader at a lower term. It is possible
 			// that these messages were simply delayed in the network, but this could
 			// also mean that this node has advanced its term number during a network
@@ -925,6 +943,7 @@ func (r *raft) Step(m pb.Message) error {
 			// fresh election. This can be prevented with Pre-Vote phase.
 			r.send(pb.Message{To: m.From, Type: pb.MsgAppResp})
 		} else if m.Type == pb.MsgPreVote {
+			// 对于term比当前节点term低的预投票请求，无论是否开启了Check Quorum / Leader Lease或Pre-Vote，都要通过一条term为当前term的消息，迫使其转为follower并更新term。
 			// Before Pre-Vote enable, there may have candidate with higher term,
 			// but less log. After update to Pre-Vote, the cluster may deadlock if
 			// we drop messages with a lower term.
@@ -957,6 +976,7 @@ func (r *raft) Step(m pb.Message) error {
 		// ...and we believe the candidate is up to date.
 		if canVote && r.raftLog.isUpToDate(m.Index, m.LogTerm) {
 			// 这一坨说的是为什么当learner收到投票消息时，需要投票
+			// 大体上是说如果没有他投票，可能就无法选出leader
 			// Note: it turns out that that learners must be allowed to cast votes.
 			// This seems counter- intuitive but is necessary in the situation in which
 			// a learner has been promoted (i.e. is now a voter) but has not learned
@@ -1073,6 +1093,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			if cc != nil {
 				alreadyPending := r.pendingConfIndex > r.raftLog.applied
 				alreadyJoint := len(r.prs.Config.Voters[1]) > 0
+				// 如果消息（旧格式的消息会转为V2处理）的Changes字段为空时，说明该消息为退出joint configuration而转到$C_{new}$的消息
 				wantsLeaveJoint := len(cc.AsV2().Changes) == 0
 
 				var refused string
@@ -1143,6 +1164,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			// follower's log ends (RejectHint=follower's last index) and the
 			// subsequent probe succeeds.
 			//
+			// 当拒绝之后进行探测，可能会花费大量时间甚至导致不可用，所以就有了下面的优化设计
 			// However, when networks are partitioned or systems overloaded,
 			// large divergent log tails can occur. The naive attempt, probing
 			// entry by entry in decreasing order, will be the product of the
@@ -1268,6 +1290,7 @@ func stepLeader(r *raft, m pb.Message) error {
 			}
 		} else {
 			oldPaused := pr.IsPaused()
+			// progress根据回包向前推进
 			if pr.MaybeUpdate(m.Index) {
 				switch {
 				case pr.State == tracker.StateProbe:
@@ -1289,6 +1312,7 @@ func stepLeader(r *raft, m pb.Message) error {
 					pr.Inflights.FreeLE(m.Index)
 				}
 
+				// raftLog根据progress新进度来提交
 				if r.maybeCommit() {
 					// committed index has progressed for the term, so it is safe
 					// to respond to pending read index requests
@@ -1854,7 +1878,7 @@ func (r *raft) reduceUncommittedSize(ents []pb.Entry) {
 	}
 }
 
-// 计算有多少entry处于conf切换状态
+// 计算有多少entry处于confChange切换状态
 func numOfPendingConf(ents []pb.Entry) int {
 	n := 0
 	for i := range ents {

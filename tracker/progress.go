@@ -34,7 +34,7 @@ type Progress struct {
     // 的最大日志索引是Next-1，而Match的就是经过Follower确认接收的最大日志索引，Next-Match-1
     // 就是还在飞行中或者还在路上的日志数量（Inflights）。Inflights还是比较形象的，下面会有详细
     // 说明。
-	// 已发送成功和下一条要发送的提案index
+	// 已进过quorum确认的index和下一条要发送的提案index
 	Match, Next uint64
 	// State defines how the leader should interact with the follower.
 	//
